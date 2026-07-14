@@ -1,14 +1,16 @@
 from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
+from sqlmodel import or_, select
 
 from app.core.security import (
     create_access_token,
     create_refresh_token,
+    hash_password,
     verify_password,
 )
 from app.models.user import User
+from app.schemas.user import UserCreate
 
 
 class AuthService:
@@ -18,6 +20,26 @@ class AuthService:
     async def _get_by_username(self, username: str) -> User | None:
         result = await self.session.execute(select(User).where(User.username == username))
         return result.scalars().first()
+
+    async def create_user(self, user: UserCreate) -> User | None:
+        """Create a user, or return None if the username/email is taken."""
+        statement = select(User).where(
+            or_(User.username == user.username, User.email == user.email)
+        )
+        result = await self.session.execute(statement)
+        if result.scalars().first() is not None:
+            return None
+
+        new_user = User(
+            username=user.username,
+            email=user.email,
+            hashed_password=hash_password(user.password),
+        )
+        self.session.add(new_user)
+        await self.session.commit()
+        await self.session.refresh(new_user)
+        return new_user
+
 
     async def login(self, username: str, password: str) -> tuple[str, str] | None:
         """Verify credentials and issue tokens, or return None on failure.
