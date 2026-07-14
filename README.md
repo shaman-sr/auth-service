@@ -38,24 +38,29 @@ curl -X POST localhost:8000/auth/register -H 'content-type: application/json' \
   -d '{"username":"alice","email":"alice@example.com","password":"pw"}'
 curl -X POST localhost:8000/auth/login -H 'content-type: application/json' \
   -d '{"username":"alice","password":"pw"}'          # -> access_token + refresh_token
-curl -X POST localhost:8000/auth/logout -H 'content-type: application/json' \
-  -d '{"refresh_token":"<refresh_token from login>"}'
+curl -X POST localhost:8000/auth/refresh -H 'content-type: application/json' \
+  -d '{"refresh_token":"<refresh_token>"}'           # -> rotated token pair
+curl -X POST localhost:8000/auth/logout \
+  -H 'Authorization: Bearer <access_token>'          # revokes the refresh token
 ```
 
 Tear down: `docker compose down -v` (or `just down`).
 
-## Auth flow — what's a decision left to you
+## Auth flow
 
-The endpoints, services, and schemas are wired end to end, but the security
-primitives in `app/core/security.py` are **insecure placeholders** marked with
-`TODO(auth)`. Replace them to choose your real auth flow:
+- **Passwords** are hashed with bcrypt (`app/core/security.py`).
+- **Access / refresh tokens** are signed JWTs (HS256) with `sub`, `type`, `iat`,
+  `exp`, and a unique `jti`. Lifetimes and the signing key are configured in
+  `app/core/config.py` (`JWT_SECRET_KEY`, `ACCESS_TOKEN_EXPIRE_MINUTES`,
+  `REFRESH_TOKEN_EXPIRE_DAYS`).
+- The current refresh token is stored on the user row, so **logout** revokes it
+  and **refresh rotates** it — a reused (pre-rotation or post-logout) refresh
+  token is rejected.
+- **Protected routes** depend on `get_current_user` (`app/api/deps.py`), which
+  validates a `Bearer` access token.
 
-- `hash_password` / `verify_password` — pick a KDF (bcrypt / argon2).
-- `create_access_token` / `create_refresh_token` — opaque vs JWT, claims, expiry,
-  refresh rotation.
-- Logout currently revokes a posted refresh token; a real logout should identify
-  the caller from their authenticated request (see the `TODO(auth)` in
-  `app/api/routes/auth.py`).
+⚠️ Set a strong `JWT_SECRET_KEY` in every real environment:
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`.
 
 ## Layout
 
